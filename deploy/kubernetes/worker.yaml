@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-worker
+  namespace: nexus
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nexus-worker}
+  template:
+    metadata:
+      labels: {app: nexus-worker}
+    spec:
+      containers:
+        - name: worker
+          image: nexus-api:2.0.0
+          imagePullPolicy: IfNotPresent
+          command: ["celery","-A","app.worker.celery_app","worker","--loglevel=INFO"]
+          env:
+            - name: DATABASE_URL
+              value: "postgresql+psycopg://nexus:nexus-local-change-me@nexus-postgres:5432/nexus"
+            - name: REDIS_URL
+              value: "redis://nexus-redis:6379/0"

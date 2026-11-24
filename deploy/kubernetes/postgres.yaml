@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nexus-db-secret
+  namespace: nexus
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: nexus-local-change-me
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nexus-postgres-data
+  namespace: nexus
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-postgres
+  namespace: nexus
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: nexus-postgres}
+  template:
+    metadata:
+      labels: {app: nexus-postgres}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports: [{containerPort: 5432}]
+          env:
+            - name: POSTGRES_DB
+              value: nexus
+            - name: POSTGRES_USER
+              value: nexus
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: nexus-db-secret, key: POSTGRES_PASSWORD}
+          volumeMounts:
+            - {name: db-data, mountPath: /var/lib/postgresql/data}
+      volumes:
+        - name: db-data
+          persistentVolumeClaim: {claimName: nexus-postgres-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-postgres
+  namespace: nexus
+spec:
+  selector: {app: nexus-postgres}
+  ports: [{port: 5432, targetPort: 5432}]

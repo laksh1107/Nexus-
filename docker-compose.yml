@@ -1,0 +1,81 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nexus}
+      POSTGRES_USER: ${POSTGRES_USER:-nexus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local}
+    volumes: [nexus_pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus -d nexus"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://nexus:change_me_local@db:5432/nexus}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    ports: ["8000:8000"]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes: ["./data:/app/data"]
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: celery -A app.worker.celery_app worker --loglevel=INFO
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://nexus:change_me_local@db:5432/nexus}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    volumes: ["./data:/app/data"]
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports: ["3002:3000"]
+    depends_on: [api]
+  loki:
+    image: grafana/loki:3.1.1
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes: ["./observability/loki-config.yaml:/etc/loki/local-config.yaml:ro"]
+    ports: ["3100:3100"]
+  promtail:
+    image: grafana/promtail:3.1.1
+    command: -config.file=/etc/promtail/config.yaml
+    volumes:
+      - ./observability/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - promtail_positions:/tmp
+    depends_on: [loki]
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    ports: ["9090:9090"]
+    volumes: ["./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    depends_on: [api]
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports: ["3001:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes: ["./observability/provisioning:/etc/grafana/provisioning"]
+    depends_on: [loki, prometheus]
+volumes:
+  nexus_pg:
+  promtail_positions:
